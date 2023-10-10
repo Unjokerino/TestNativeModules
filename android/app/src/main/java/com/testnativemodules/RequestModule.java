@@ -41,6 +41,81 @@ public class RequestModule extends ReactContextBaseJavaModule {
     public HashMap<String, Object> headers;
   }
 
+  public static class ResponseData {
+    public String type;
+    public String data;
+    public int statusCode;
+  }
+  public class RequestHandler {
+    private RequestParams params;
+
+    public RequestHandler(RequestParams params) {
+      this.params = params;
+    }
+
+    public ResponseData execute() throws Exception {
+      if (params.url == null || params.url.isEmpty()) {
+        throw new IllegalArgumentException("URL is required");
+      }
+      if (params.type == null || (!params.type.equals("GET") && !params.type.equals("POST"))) {
+        throw new IllegalArgumentException("Invalid or null request method type");
+      }
+
+      HttpURLConnection urlConnection = null;
+      ResponseData responseData = new ResponseData();
+
+      try {
+        URL url = new URL(params.url);
+        urlConnection = (HttpURLConnection) url.openConnection();
+        urlConnection.setRequestMethod(params.type);
+
+        if (params.headers != null) {
+          for (Map.Entry<String, Object> header : params.headers.entrySet()) {
+            urlConnection.setRequestProperty(header.getKey(), (String) header.getValue());
+          }
+        }
+
+        if ("POST".equals(params.type)) {
+          urlConnection.setDoOutput(true);
+          try (OutputStream os = urlConnection.getOutputStream()) {
+            byte[] input = params.body.toString().getBytes("utf-8");
+            os.write(input, 0, input.length);
+          }
+        }
+
+        int responseCode = urlConnection.getResponseCode();
+        responseData.statusCode = responseCode;
+
+        InputStream inputStream = (responseCode == HttpURLConnection.HTTP_OK) ?
+                urlConnection.getInputStream() : urlConnection.getErrorStream();
+
+        StringBuilder content = new StringBuilder();
+
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(inputStream))) {
+          String inputLine;
+          while ((inputLine = in.readLine()) != null) {
+            content.append(inputLine);
+          }
+        }
+
+        // Contains error message
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+          responseData.type = "success";
+        } else {
+          responseData.type = "error";
+        }
+        responseData.data = content.toString();
+
+        return responseData;
+
+      } finally {
+        if (urlConnection != null) {
+          urlConnection.disconnect();
+        }
+      }
+    }
+  }
+
   @ReactMethod
   public void makeRequest(
     String urlString,
@@ -48,9 +123,6 @@ public class RequestModule extends ReactContextBaseJavaModule {
     Promise promise
   ) {
     RequestParams params = new RequestParams();
-    WritableMap result = new WritableNativeMap();
-    HttpURLConnection urlConnection = null;
-
     params.url = urlString;
 
     if (paramsMap != null && paramsMap.hasKey("type")) {
@@ -63,71 +135,32 @@ public class RequestModule extends ReactContextBaseJavaModule {
       params.headers = paramsMap.getMap("headers").toHashMap();
     }
 
+    if (paramsMap == null || !paramsMap.hasKey("type")) {
+      WritableMap result = new WritableNativeMap();
+      result.putString("type", "error");
+      result.putString("error", "Request 'type' is required");
+      promise.resolve(result);
+      return;
+    }
+
+    RequestHandler handler = new RequestHandler(params);
+
     try {
-      if (urlString == null || urlString.isEmpty()) {
-        throw new IllegalArgumentException("URL is required");
-      }
-      if (paramsMap == null || !paramsMap.hasKey("type")) {
-        throw new IllegalArgumentException("Request 'type' is required");
-      }
-      if (params.type == null || (!params.type.equals("GET") && !params.type.equals("POST"))) {
-        throw new IllegalArgumentException("Invalid or null request method type");
-      }
-      URL url = new URL(urlString);
-      urlConnection = (HttpURLConnection) url.openConnection();
-      urlConnection.setRequestMethod(params.type);
-      
-      if (params.headers != null) {
-        for (Map.Entry<String, Object> header : params.headers.entrySet()) {
-          urlConnection.setRequestProperty(header.getKey(), (String) header.getValue());
-        }
-      }
-
-      if (params.type.equals("POST")) {
-        urlConnection.setDoOutput(true);
-        try (OutputStream os = urlConnection.getOutputStream()) {
-          byte[] input = params.body.toString().getBytes("utf-8");
-          os.write(input, 0, input.length);
-        }
-      }
-      InputStream inputStream;
-
-      int responseCode = urlConnection.getResponseCode();
-      result.putInt("statusCode", responseCode);
-
-      if (responseCode == HttpURLConnection.HTTP_OK) {
-        inputStream = urlConnection.getInputStream();
+      ResponseData responseData = handler.execute();
+      WritableMap result = new WritableNativeMap();
+      result.putString("type", responseData.type);
+      if(responseData.type == "success"){
+        result.putString("data", responseData.data);
       } else {
-        inputStream = urlConnection.getErrorStream();  // Get error details
+        result.putString("error", responseData.data);
       }
-
-
-      try (BufferedReader in = new BufferedReader(new InputStreamReader(inputStream))) {
-        String inputLine;
-        StringBuffer content = new StringBuffer();
-
-        while ((inputLine = in.readLine()) != null) {
-          content.append(inputLine);
-        }
-
-        if (responseCode == HttpURLConnection.HTTP_OK) {
-          result.putString("type", "success");
-          result.putString("data", content.toString());
-        } else {
-          result.putString("type", "error");
-          result.putString("error", content.toString());
-        }
-      } catch (IOException e) {
-        throw new IOException("Server returned non-OK status: " + responseCode);
-      }
+      result.putInt("statusCode", responseData.statusCode);
+      promise.resolve(result);
     } catch (Exception e) {
+      WritableMap result = new WritableNativeMap();
       result.putString("type", "error");
       result.putString("error", e.toString());
-    } finally {
       promise.resolve(result);
-      if (urlConnection != null) {
-        urlConnection.disconnect();
-      }
     }
   }
 }
