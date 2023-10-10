@@ -9,7 +9,7 @@ import {
 
 import {Colors} from 'react-native/Libraries/NewAppScreen';
 import {RequestParams, Response} from './types';
-import RequestModule from './MakeRequestModule';
+import RequestModule from './modules';
 
 function App(): JSX.Element {
   const isDarkMode = useColorScheme() === 'dark';
@@ -21,7 +21,6 @@ function App(): JSX.Element {
 
   const onMakeRequest = async (url: string, params: RequestParams) => {
     const result = await RequestModule.makeRequest(url, params);
-    console.log(result);
     setResponse(result);
   };
 
@@ -43,7 +42,7 @@ function App(): JSX.Element {
         onPress={() =>
           onMakeRequest('https://httpbin.org/post', {
             type: 'POST',
-            body: {},
+
             headers: {},
           })
         }

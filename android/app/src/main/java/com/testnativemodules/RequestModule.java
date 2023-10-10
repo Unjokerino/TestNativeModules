@@ -69,7 +69,7 @@ public class RequestModule extends ReactContextBaseJavaModule {
           }
         }
 
-        if ("POST".equals(params.type)) {
+        if ("POST".equals(params.type) && params.body != null) {
           urlConnection.setDoOutput(true);
           try (OutputStream os = urlConnection.getOutputStream()) {
             byte[] input = params.body.toString().getBytes("utf-8");
